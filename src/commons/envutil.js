@@ -8,6 +8,12 @@
 
 // musn't import /depend on anything.
 
+export function isProd() {
+  if (!envManager) return false;
+
+  return envManager.determineEnvStage() === "production";
+}
+
 export function onFly() {
   if (!envManager) return false;
 
@@ -47,7 +53,7 @@ export function hasDisk() {
 
 export function useMmap() {
   // got disk on fly and local deploys
-  return onFly() || onLocal();
+  return (onFly() || onLocal()) && (isNode() || isBun());
 }
 
 export function hasDynamicImports() {
@@ -89,6 +95,9 @@ export function isDeno() {
   return envManager.r() === "deno";
 }
 
+/**
+ * in milliseconds
+ */
 export function workersTimeout(missing = 0) {
   if (!envManager) return missing;
   return envManager.get("WORKER_TIMEOUT") || missing;

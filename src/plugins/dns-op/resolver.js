@@ -13,6 +13,7 @@ import * as dnsutil from "../../commons/dnsutil.js";
 import * as bufutil from "../../commons/bufutil.js";
 import * as util from "../../commons/util.js";
 import * as envutil from "../../commons/envutil.js";
+import * as system from "../../system.js";
 import { BlocklistFilter } from "../rethinkdns/filter.js";
 
 export default class DNSResolver {
@@ -33,9 +34,11 @@ export default class DNSResolver {
     this.log = log.withTags("DnsResolver");
 
     this.measurements = [];
+    this.coalstats = { tot: 0, pub: 0, empty: 0, try: 0 };
     this.profileResolve = envutil.profileDnsResolves();
     // only valid on nodejs
     this.forceDoh = envutil.forceDoh();
+    this.timeout = (envutil.workersTimeout() / 2) | 0;
 
     // only valid on workers
     // bg-bw-init results in higher io-wait, not lower
@@ -265,7 +268,7 @@ export default class DNSResolver {
     // check outgoing cached dns-packet against blocklists
     this.blocker.blockAnswer(rxid, /* out*/ r, blInfo);
     const fromCache = cacheutil.hasCacheHeader(res.headers);
-    this.log.d(rxid, "ans block?", r.isBlocked, "from cache?", fromCache);
+    this.log.d(rxid, "ansblock?", r.isBlocked, "fromcache?", fromCache);
 
     // if res was got from caches or if res was got from max doh (ie, blf
     // wasn't used to retrieve stamps), then skip hydrating the cache
@@ -311,7 +314,7 @@ export default class DNSResolver {
     this.log.d(rxid, "primeCache: block?", blocked, "k", k.href);
 
     if (!k) {
-      this.log.d(rxid, "no cache-key, url/query missing?", k, r.stamps);
+      this.log.d(rxid, "primeCache: no key, url/query missing?", k, r.stamps);
       return;
     }
 
@@ -342,24 +345,39 @@ DNSResolver.prototype.resolveDnsUpstream = async function (
   query,
   packet
 ) {
-  // Promise.any on promisedPromises[] only works if there are
-  // zero awaits in this function or any of its downstream calls.
-  // Otherwise, the first reject in promisedPromises[], before
-  // any statement in the call-stack awaits, would throw unhandled
-  // error, since the event loop would have 'ticked' and Promise.any
-  // on promisedPromises[] would still not have been executed, as it
-  // is the last statement of this function (which would have eaten up
-  // all rejects as long as there was one resolved promise).
-  const promisedPromises = [];
-
   // if no doh upstreams set, resolve over plain-old dns
   if (util.emptyArray(resolverUrls)) {
+    const eid = cacheutil.makeId(packet);
+    /** @type {ArrayBuffer[]?} */
+    let parcel = null;
+
+    try {
+      const g = await system.when(eid, this.timeout);
+      this.coalstats.tot += 1;
+      if (!util.emptyArray(g) && g[0] != null) {
+        const sz = bufutil.len(g[0]);
+        this.log.d(rxid, "coalesced", eid, sz, this.coalstats);
+        if (sz > 0) return Promise.resolve(new Response(g[0]));
+      }
+      this.coalstats.empty += 1;
+      this.log.e(rxid, "empty coalesced", eid, this.coalstats);
+      return Promise.resolve(util.respond503());
+    } catch (reason) {
+      // happens on timeout or if new event, eid
+      this.coalstats.try += 1;
+      this.log.d(rxid, "not coalesced", eid, reason, this.coalstats);
+    }
+
     if (this.transport == null) {
       this.log.e(rxid, "plain dns transport not set");
+      this.coalstats.pub += 1;
+      system.pub(eid, parcel);
       return Promise.reject(new Error("plain dns transport not set"));
     }
-    // do not let exceptions passthrough to the caller
+
+    let promisedResponse = null;
     try {
+      // do not let exceptions passthrough to the caller
       const q = bufutil.bufferOf(query);
 
       let ans = await this.transport.udpquery(rxid, q);
@@ -369,19 +387,31 @@ DNSResolver.prototype.resolveDnsUpstream = async function (
       }
 
       if (ans) {
-        const r = new Response(bufutil.arrayBufferOf(ans));
-        promisedPromises.push(Promise.resolve(r));
+        const ab = bufutil.arrayBufferOf(ans);
+        parcel = [ab];
+        promisedResponse = Promise.resolve(new Response(ab));
       } else {
-        promisedPromises.push(Promise.resolve(util.respond503()));
+        promisedResponse = Promise.resolve(util.respond503());
       }
     } catch (e) {
       this.log.e(rxid, "err when querying plain old dns", e.stack);
-      promisedPromises.push(Promise.reject(e));
+      promisedResponse = Promise.reject(e);
     }
 
-    return Promise.any(promisedPromises);
+    this.coalstats.pub += 1;
+    system.pub(eid, parcel);
+    return promisedResponse;
   }
 
+  // Promise.any on promisedPromises[] only works if there are
+  // zero awaits in this function or any of its downstream calls.
+  // Otherwise, the first reject in promisedPromises[], before
+  // any statement in the call-stack awaits, would throw unhandled
+  // error, since the event loop would have 'ticked' and Promise.any
+  // on promisedPromises[] would still not have been executed, as it
+  // is the last statement of this function (which would have eaten up
+  // all rejects as long as there was one resolved promise).
+  const promisedPromises = [];
   try {
     // upstream to cache
     this.log.d(rxid, "upstream cache");
