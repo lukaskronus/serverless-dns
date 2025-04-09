@@ -1,0 +1,14 @@
+name: Deploy to Deno
+on:
+  push:
+    branches: deno-deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Deno
+        uses: denoland/deployctl@v1
+        with:
+          project: alist-lukas
+          entrypoint: main.ts
