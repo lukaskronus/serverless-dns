@@ -1,7 +1,8 @@
 // src/handleRequest.ts
-async function handleRequest(request: Request): Promise<Response> {
-  if (request.method === "OPTIONS") {
-    return handleOptions(request);
-  }
-  return await handleDownload(request);
-}
+import { handleDownload } from "./handleDownload.ts";
+import { handleOptions } from "./handleOptions.ts";
+
+export const handleRequest = async (request: Request): Promise<Response> => {
+  if (request.method === "OPTIONS") return handleOptions(request);
+  return handleDownload(request);
+};

@@ -1,21 +1,16 @@
 // src/verify.ts
-const verify = async (data: string, _sign: string): Promise<string> => {
+import { TOKEN } from "./const.ts";
+
+export const verify = async (data: string, _sign: string): Promise<string> => {
   const signSlice = _sign.split(":");
-  if (!signSlice[signSlice.length - 1]) {
-    return "expire missing";
-  }
+  if (!signSlice[signSlice.length - 1]) return "expire missing";
+  
   const expire = parseInt(signSlice[signSlice.length - 1]);
-  if (isNaN(expire)) {
-    return "expire invalid";
-  }
-  if (expire < Date.now() / 1e3 && expire > 0) {
-    return "expire expired";
-  }
+  if (isNaN(expire)) return "expire invalid";
+  if (expire < Date.now() / 1e3 && expire > 0) return "expire expired";
+  
   const right = await hmacSha256Sign(data, expire);
-  if (_sign !== right) {
-    return "sign mismatch";
-  }
-  return "";
+  return _sign === right ? "" : "sign mismatch";
 };
 
 const hmacSha256Sign = async (data: string, expire: number): Promise<string> => {
@@ -26,12 +21,14 @@ const hmacSha256Sign = async (data: string, expire: number): Promise<string> => 
     false,
     ["sign"]
   );
-  const buf = await crypto.subtle.sign(
-    { name: "HMAC" },
+  
+  const signature = await crypto.subtle.sign(
+    "HMAC",
     key,
     new TextEncoder().encode(`${data}:${expire}`)
   );
-  return btoa(String.fromCharCode(...new Uint8Array(buf)))
+  
+  return btoa(String.fromCharCode(...new Uint8Array(signature)))
     .replace(/\+/g, "-")
     .replace(/\//g, "_") + ":" + expire;
 };
