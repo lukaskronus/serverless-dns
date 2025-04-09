@@ -30,7 +30,7 @@ jobs:
         uses: denoland/deployctl@v1
         with:
           project: "alist-lukas"
-          entrypoint: "index.js"
+          entrypoint: "src/index.ts"
           root: "."
           
           
