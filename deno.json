@@ -1,15 +1,5 @@
 {
-  "compilerOptions": {
-    "lib": ["dom", "esnext"],
-    "target": "esnext",
-    "module": "esnext",
-    "moduleResolution": "node",
-    "strict": true,
-    "sourceMap": true,
-    "outDir": "./dist",
-    "rootDir": "./src"
-  },
   "tasks": {
-    "start": "deno run --allow-env --allow-net src/index.ts"
+    "start": "deno run --allow-env --allow-net main.ts"
   }
 }
