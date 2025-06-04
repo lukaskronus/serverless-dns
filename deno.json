@@ -1,6 +1,5 @@
 {
   "tasks": {
     "start": "deno run -A mtproto_proxy.ts"
-  },
-  "importMap": "./import_map.json"
+  }
 }
