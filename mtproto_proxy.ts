@@ -1,125 +1,78 @@
+// mtproto_proxy.ts
 import { serve } from "https://deno.land/std@0.200.0/http/server.ts";
-import { crypto } from "https://deno.land/std@0.200.0/crypto/mod.ts";
 
-// Configuration - set these via environment variables
+// Configuration
 const CONFIG = {
-  SECRET: Deno.env.get("MT_PROTO_SECRET") || crypto.randomUUID().replace(/-/g, ""),
-  PORT: parseInt(Deno.env.get("PORT") || "9090"),
-  TAG: Deno.env.get("PROXY_TAG") || "deno-mtproto-proxy",
-  DC_OPTIONS: [
-    { id: 1, ip: "149.154.175.50", port: 443 },
-    { id: 2, ip: "149.154.167.51", port: 443 },
-    { id: 3, ip: "149.154.175.100", port: 443 },
-    { id: 4, ip: "149.154.167.91", port: 443 },
-    { id: 5, ip: "91.108.56.100", port: 443 },
-  ],
+  SECRET: Deno.env.get("MT_PROTO_SECRET") || generateSecret(),
+  PORT: parseInt(Deno.env.get("PORT") || "8000"),
+  DC_IP: Deno.env.get("DC_IP") || "149.154.167.91", // Telegram DC IP
+  DC_PORT: parseInt(Deno.env.get("DC_PORT") || "443"),
 };
 
-// MTProto protocol constants
-const MT_PROTO_HEADER = 0xefefefef;
-const ABRIDGED_VERSION = 0xef;
-
-// Helper to connect to Telegram DC
-async function connectToDC(dc: typeof CONFIG.DC_OPTIONS[0]) {
-  try {
-    const conn = await Deno.connect({
-      hostname: dc.ip,
-      port: dc.port,
-    });
-    return conn;
-  } catch (err) {
-    console.error(`Failed to connect to DC ${dc.id}:`, err);
-    return null;
-  }
+// Generate a random secret if none provided
+function generateSecret(): string {
+  const arr = new Uint8Array(32);
+  crypto.getRandomValues(arr);
+  return Array.from(arr, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-// Handle client connections
-async function handleConnection(conn: Deno.Conn) {
-  const buffer = new Uint8Array(4096);
-  const dcConn = await connectToDC(CONFIG.DC_OPTIONS[0]);
+// Handle WebSocket connections
+async function handleWs(socket: WebSocket) {
+  let telegramSocket: WebSocket | null = null;
   
-  if (!dcConn) {
-    conn.close();
-    return;
+  try {
+    telegramSocket = new WebSocket(`wss://${CONFIG.DC_IP}:${CONFIG.DC_PORT}/api`);
+    
+    telegramSocket.onopen = () => console.log("Connected to Telegram DC");
+    telegramSocket.onmessage = (e) => socket.send(e.data);
+    telegramSocket.onclose = () => socket.close();
+    
+    socket.onmessage = (e) => telegramSocket?.send(e.data);
+    socket.onclose = () => telegramSocket?.close();
+    
+  } catch (err) {
+    console.error("WebSocket error:", err);
+    socket.close();
+    telegramSocket?.close();
   }
-
-  // Pipe data between client and DC
-  const pipe = async (src: Deno.Conn, dst: Deno.Conn) => {
-    try {
-      while (true) {
-        const n = await src.read(buffer);
-        if (n === null) break;
-        await dst.write(buffer.subarray(0, n));
-      }
-    } catch (err) {
-      console.error("Pipe error:", err);
-    } finally {
-      src.close();
-      dst.close();
-    }
-  };
-
-  // Start bidirectional piping
-  pipe(conn, dcConn);
-  pipe(dcConn, conn);
 }
 
-// HTTP/WebSocket handler
-async function handleRequest(req: Request, connInfo: Deno.ServeHandlerInfo) {
+// HTTP request handler
+function handleRequest(req: Request): Response {
   const url = new URL(req.url);
-
+  
   // WebSocket endpoint for MTProto
-  if (url.pathname === "/api" && req.headers.get("upgrade") === "websocket") {
+  if (url.pathname === "/proxy" && req.headers.get("upgrade") === "websocket") {
     const { socket, response } = Deno.upgradeWebSocket(req);
-    
-    socket.onmessage = async (e) => {
-      // Handle MTProto messages here
-      // In production, you'd decrypt/process messages
-      socket.send(e.data);
-    };
-
+    handleWs(socket);
     return response;
   }
-
-  // Proxy info endpoint
+  
+  // Proxy info for Telegram client
   if (url.pathname === "/proxy_info") {
     return Response.json({
-      server: `${url.hostname}`,
-      port: CONFIG.PORT,
+      server: url.hostname,
+      port: 443, // Deno Deploy uses 443 for HTTPS
       secret: CONFIG.SECRET,
-      tag: CONFIG.TAG,
-      dc_options: CONFIG.DC_OPTIONS,
     });
   }
-
-  // Health check
-  if (url.pathname === "/health") {
-    return new Response("OK");
-  }
-
-  // Default response
+  
+  // Simple homepage
   return new Response(`
-MTProto Proxy (Deno)
---------------------
-Secret: ${CONFIG.SECRET}
-Tag: ${CONFIG.TAG}
-Port: ${CONFIG.PORT}
+Telegram MTProto Proxy (Deno Deploy)
 
-Use /proxy_info for client configuration
-`.trim(), { headers: { "Content-Type": "text/plain" } });
+Secret: ${CONFIG.SECRET}
+
+Add this proxy to Telegram:
+1. Go to Settings > Data and Storage > Proxy
+2. Add proxy: MTProto
+3. Server: ${url.hostname}
+4. Port: 443
+5. Secret: ${CONFIG.SECRET}
+6. Save and connect
+`.trim());
 }
 
-// Start servers
-console.log(`Starting MTProto proxy on port ${CONFIG.PORT}`);
-console.log(`Proxy secret: ${CONFIG.SECRET}`);
-
-// Start HTTP server
+// Start server
+console.log(`MTProto Proxy running on port ${CONFIG.PORT}`);
 serve(handleRequest, { port: CONFIG.PORT });
-
-// Start raw TCP server for MTProto
-Deno.listen({ port: CONFIG.PORT }).then(async (listener) => {
-  console.log(`TCP server ready on port ${CONFIG.PORT}`);
-  for await (const conn of listener) {
-    handleConnection(conn);
-  }
-});
