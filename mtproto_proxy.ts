@@ -4,7 +4,7 @@ import { crypto } from "https://deno.land/std@0.200.0/crypto/mod.ts";
 // Configuration - set these via environment variables
 const CONFIG = {
   SECRET: Deno.env.get("MT_PROTO_SECRET") || crypto.randomUUID().replace(/-/g, ""),
-  PORT: parseInt(Deno.env.get("PORT") || "8080"),
+  PORT: parseInt(Deno.env.get("PORT") || "9090"),
   TAG: Deno.env.get("PROXY_TAG") || "deno-mtproto-proxy",
   DC_OPTIONS: [
     { id: 1, ip: "149.154.175.50", port: 443 },
