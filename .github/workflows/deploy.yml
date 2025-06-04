@@ -1,14 +1,17 @@
-name: Deploy to Deno
+name: Deploy to Deno Deploy
 on:
   push:
-    branches: deno-deploy
-
+    branches: [main]
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to Deno
+      - name: Deploy to Deno Deploy
         uses: denoland/deployctl@v1
         with:
-          project: alist-lukas
-          entrypoint: main.ts
+          project: your-project-name
+          entrypoint: mtproto_proxy.ts
+          env: |
+            MT_PROTO_SECRET=${{ secrets.MT_PROTO_SECRET }}
+            PORT=8080
+            PROXY_TAG=production-proxy
