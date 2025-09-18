@@ -1,5 +1,9 @@
 {
   "tasks": {
-    "start": "deno run -A mtproto_proxy.ts"
+    "dev": "deno run --allow-net --allow-env mod.ts",
+    "deploy": "deployctl deploy --project=your-project-name mod.ts"
+  },
+  "compilerOptions": {
+    "lib": ["deno.window"]
   }
 }
